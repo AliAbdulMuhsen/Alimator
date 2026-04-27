@@ -12,6 +12,7 @@ function SearchPage({ user, onLogout }) {
   const [error, setError] = useState('');
   const [inflationRate, setInflationRate] = useState(0);
   const [referenceYear, setReferenceYear] = useState(new Date().getFullYear());
+  const [selectedUnit, setSelectedUnit] = useState('');
   const navigate = useNavigate();
 
   const handleSearch = async (query) => {
@@ -51,6 +52,9 @@ function SearchPage({ user, onLogout }) {
         params: { description: query }
       });
       setResults(response.data);
+
+      // Reset unit selection. If only one unit exists we'll auto-select it below.
+      setSelectedUnit('');
     } catch (err) {
       setError('Search failed');
       setResults(null);
@@ -83,20 +87,48 @@ function SearchPage({ user, onLogout }) {
     return inflatedPrice.toFixed(2);
   };
 
-  // Get years range from results for context
-  const getYearsFromResults = () => {
-    if (!results || !results.results || results.results.length === 0) {
-      return null;
-    }
-    
-    const years = results.results.map(r => parseInt(r.project_date.split('-')[0]));
-    const minYear = Math.min(...years);
-    const maxYear = Math.max(...years);
-    
-    return { minYear, maxYear };
+  // Utility: get unique units from results
+  const getUniqueUnits = () => {
+    if (!results || !results.results) return [];
+    const units = Array.from(new Set(results.results.map(r => r.unit)));
+    return units;
   };
 
-  const yearsRange = getYearsFromResults();
+  // Compute filtered results based on selectedUnit (or all if none selected)
+  const getFilteredResults = () => {
+    if (!results || !results.results) return [];
+    if (!selectedUnit) return results.results;
+    return results.results.filter(r => r.unit === selectedUnit);
+  };
+
+  // Compute statistics from filtered results (frontend fallback)
+  const computeStatisticsFrom = (rows) => {
+    if (!rows || rows.length === 0) return null;
+    const prices = rows.map(r => Number(r.unit_price));
+    const avg = prices.reduce((a,b) => a + b, 0) / prices.length;
+    const min = Math.min(...prices);
+    const max = Math.max(...prices);
+    return {
+      average_price: parseFloat(avg.toFixed(2)),
+      min_price: parseFloat(min.toFixed(2)),
+      max_price: parseFloat(max.toFixed(2)),
+      occurrences: prices.length
+    };
+  };
+
+  const uniqueUnits = getUniqueUnits();
+  const filteredResults = getFilteredResults();
+
+  // Decide which statistics to show: if backend provided global statistics and no unit filter, use it.
+  // Otherwise compute from filtered results.
+  const displayedStatistics = (!selectedUnit && results && results.statistics) ? results.statistics : computeStatisticsFrom(filteredResults);
+
+  // Auto-select unit if only one exists
+  useEffect(() => {
+    if (uniqueUnits.length === 1) {
+      setSelectedUnit(uniqueUnits[0]);
+    }
+  }, [results]);
 
   return (
     <div className="search-page">
@@ -145,13 +177,19 @@ function SearchPage({ user, onLogout }) {
             <div className="results-header">
               <div>
                 <h2>{results.description}</h2>
-                {results.statistics && (
+                {displayedStatistics && (
                   <p className="result-count">
-                    Found in {results.statistics.occurrences} project(s)
-                    {yearsRange && ` (${yearsRange.minYear} - ${yearsRange.maxYear})`}
+                    Found in {displayedStatistics.occurrences} project(s)
+                    {results.results && results.results.length > 0 && (() => {
+                      const years = results.results.map(r => parseInt(r.project_date.split('-')[0]));
+                      const minYear = Math.min(...years);
+                      const maxYear = Math.max(...years);
+                      return ` (${minYear} - ${maxYear})`;
+                    })()}
                   </p>
                 )}
               </div>
+
               <div className="inflation-controls">
                 <div className="inflation-control">
                   <label htmlFor="inflation">
@@ -187,36 +225,65 @@ function SearchPage({ user, onLogout }) {
                     />
                   </div>
                 </div>
+
+                {/* Unit selector when multiple units exist */}
+                {uniqueUnits.length > 1 && (
+                  <div className="inflation-control unit-selector">
+                    <label htmlFor="unitSelect">
+                      <i className="fas fa-ruler"></i> Choose Unit
+                    </label>
+                    <div className="inflation-input-group">
+                      <select
+                        id="unitSelect"
+                        value={selectedUnit}
+                        onChange={(e) => setSelectedUnit(e.target.value)}
+                      >
+                        <option value="">-- Select unit to filter results --</option>
+                        {uniqueUnits.map((u, i) => (
+                          <option key={i} value={u}>{u}</option>
+                        ))}
+                        <option value="__all__">Show all units</option>
+                      </select>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
 
-            {results.statistics ? (
+            {/* If multiple units and no unit selected, prompt the user */}
+            {uniqueUnits.length > 1 && !selectedUnit && (
+              <div className="alert alert-info">
+                This item exists with multiple units. Please select the unit you want to view the results for.
+              </div>
+            )}
+
+            {displayedStatistics ? (
               <>
                 <div className="statistics-cards">
                   <div className="stat-card">
                     <h4>Average Price</h4>
-                    <p className="stat-value">${results.statistics.average_price.toFixed(2)}</p>
+                    <p className="stat-value">${displayedStatistics.average_price.toFixed(2)}</p>
                     {inflationRate > 0 && (
                       <p className="stat-inflated">
-                        → ${calculateInflatedPrice(results.statistics.average_price, `${referenceYear}-01-01`)}
+                        → ${calculateInflatedPrice(displayedStatistics.average_price, `${referenceYear}-01-01`)}
                       </p>
                     )}
                   </div>
                   <div className="stat-card">
                     <h4>Minimum Price</h4>
-                    <p className="stat-value">${results.statistics.min_price.toFixed(2)}</p>
+                    <p className="stat-value">${displayedStatistics.min_price.toFixed(2)}</p>
                     {inflationRate > 0 && (
                       <p className="stat-inflated">
-                        → ${calculateInflatedPrice(results.statistics.min_price, `${referenceYear}-01-01`)}
+                        → ${calculateInflatedPrice(displayedStatistics.min_price, `${referenceYear}-01-01`)}
                       </p>
                     )}
                   </div>
                   <div className="stat-card">
                     <h4>Maximum Price</h4>
-                    <p className="stat-value">${results.statistics.max_price.toFixed(2)}</p>
+                    <p className="stat-value">${displayedStatistics.max_price.toFixed(2)}</p>
                     {inflationRate > 0 && (
                       <p className="stat-inflated">
-                        → ${calculateInflatedPrice(results.statistics.max_price, `${referenceYear}-01-01`)}
+                        → ${calculateInflatedPrice(displayedStatistics.max_price, `${referenceYear}-01-01`)}
                       </p>
                     )}
                   </div>
@@ -237,7 +304,7 @@ function SearchPage({ user, onLogout }) {
                         </tr>
                       </thead>
                       <tbody>
-                        {results.results.map((result, index) => {
+                        {filteredResults.map((result, index) => {
                           const projectYear = parseInt(result.project_date.split('-')[0]);
                           const yearsDiff = referenceYear - projectYear;
                           return (
@@ -245,9 +312,9 @@ function SearchPage({ user, onLogout }) {
                               <td>{result.project_name}</td>
                               <td>{result.project_date}</td>
                               <td>{result.unit}</td>
-                              <td>${result.unit_price.toFixed(2)}</td>
+                              <td>${Number(result.unit_price).toFixed(2)}</td>
                               {inflationRate > 0 && (
-                                <td className="adjusted-price">${calculateInflatedPrice(result.unit_price, result.project_date)}</td>
+                                <td className="adjusted-price">${calculateInflatedPrice(Number(result.unit_price), result.project_date)}</td>
                               )}
                               {inflationRate > 0 && (
                                 <td className="years-diff">{yearsDiff} {yearsDiff === 1 ? 'year' : 'years'}</td>
