@@ -10,6 +10,7 @@ function SearchPage({ user, onLogout }) {
   const [results, setResults] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [notFound, setNotFound] = useState(false);
   const [inflationRate, setInflationRate] = useState(0);
   const [referenceYear, setReferenceYear] = useState(new Date().getFullYear());
   const [selectedUnit, setSelectedUnit] = useState('');
@@ -17,6 +18,7 @@ function SearchPage({ user, onLogout }) {
 
   const handleSearch = async (query) => {
     setSearchQuery(query);
+    setNotFound(false);
     
     if (query.length < 2) {
       setSuggestions([]);
@@ -48,16 +50,26 @@ function SearchPage({ user, onLogout }) {
     try {
       setLoading(true);
       setError('');
+      setNotFound(false);
       const response = await axios.get('/api/search/item', {
         params: { description: query }
       });
+
       setResults(response.data);
+
+      // If API returned no matching rows, show not-found message
+      if (!response.data || !response.data.results || response.data.results.length === 0) {
+        setNotFound(true);
+      } else {
+        setNotFound(false);
+      }
 
       // Reset unit selection. If only one unit exists we'll auto-select it below.
       setSelectedUnit('');
     } catch (err) {
       setError('Search failed');
       setResults(null);
+      setNotFound(false);
     } finally {
       setLoading(false);
     }
@@ -70,8 +82,8 @@ function SearchPage({ user, onLogout }) {
 
   // Calculate inflation based on year difference (compound yearly)
   const calculateInflatedPrice = (price, projectDate) => {
-    if (inflationRate === 0) {
-      return price.toFixed(2);
+    if (!price || inflationRate === 0) {
+      return Number(price || 0).toFixed(2);
     }
 
     // Extract year from project date (format: YYYY-MM-DD)
@@ -79,11 +91,11 @@ function SearchPage({ user, onLogout }) {
     const yearsDifference = referenceYear - projectYear;
 
     if (yearsDifference <= 0) {
-      return price.toFixed(2);
+      return Number(price).toFixed(2);
     }
 
     // Compound inflation formula: Price × (1 + rate)^years
-    const inflatedPrice = price * Math.pow(1 + inflationRate / 100, yearsDifference);
+    const inflatedPrice = Number(price) * Math.pow(1 + inflationRate / 100, yearsDifference);
     return inflatedPrice.toFixed(2);
   };
 
@@ -97,7 +109,7 @@ function SearchPage({ user, onLogout }) {
   // Compute filtered results based on selectedUnit (or all if none selected)
   const getFilteredResults = () => {
     if (!results || !results.results) return [];
-    if (!selectedUnit) return results.results;
+    if (!selectedUnit || selectedUnit === '__all__') return results.results;
     return results.results.filter(r => r.unit === selectedUnit);
   };
 
@@ -171,6 +183,7 @@ function SearchPage({ user, onLogout }) {
         </form>
 
         {error && <div className="alert alert-error">{error}</div>}
+        {notFound && <div className="alert alert-info">This item was not found in the database.</div>}
 
         {results && (
           <div className="results-section">
