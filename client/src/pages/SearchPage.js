@@ -75,9 +75,21 @@ function SearchPage({ user, onLogout }) {
     }
   };
 
+  // When user presses Enter, if the typed text exactly matches an autocomplete suggestion treat it as selecting that suggestion.
   const handleSubmit = (e) => {
     e.preventDefault();
-    performSearch(searchQuery);
+    const normalizedQuery = searchQuery.trim().toLowerCase();
+    if (!normalizedQuery) return;
+
+    const exactSuggestion = suggestions.find(s => s.trim().toLowerCase() === normalizedQuery);
+    if (exactSuggestion) {
+      // act as if the user clicked the suggestion
+      setSuggestions([]);
+      handleSelectSuggestion(exactSuggestion);
+    } else {
+      // fallback to performing a normal search
+      performSearch(searchQuery);
+    }
   };
 
   // Calculate inflation based on year difference (compound yearly)
