@@ -245,7 +245,25 @@ elif st.session_state.current_page == 'add_data':
             # Reordered columns: Description, Category, Unit, Quantity, Unit Price
             col1, col2, col3, col4, col5 = st.columns(5)
             with col1:
-                desc = st.text_input("Description", key=f"desc_{i}")
+                desc_key = f"desc_{i}"
+                desc = st.text_input("Description", key=desc_key)
+                # Autocomplete for this item description (uses selected category if available)
+                try:
+                    cat_state = st.session_state.get(f"cat_{i}", None)
+                except Exception:
+                    cat_state = None
+                cat_id = None
+                if cat_state and cat_state != "None":
+                    cat_id = Category.get_by_name(cat_state)
+                if len(st.session_state.get(desc_key, "")) >= 2:
+                    local_suggestions = Search.autocomplete(st.session_state.get(desc_key, ""), cat_id, limit=6)
+                    if local_suggestions:
+                        sugg_cols = st.columns(3)
+                        for sidx, s in enumerate(local_suggestions):
+                            c = sugg_cols[sidx % 3]
+                            if c.button(s, key=f"manual_sugg_{i}_{sidx}"):
+                                st.session_state[desc_key] = s
+                                st.experimental_rerun()
             with col2:
                 cat = st.selectbox("Category", category_names, key=f"cat_{i}")
             with col3:
@@ -256,7 +274,7 @@ elif st.session_state.current_page == 'add_data':
                 price = st.number_input("Unit Price", min_value=0.0, step=0.01, key=f"price_{i}")
             
             items_data.append({
-                'description': desc,
+                'description': st.session_state.get(desc_key, ''),
                 'unit': unit,
                 'quantity': qty,
                 'unit_price': price,
@@ -345,32 +363,42 @@ elif st.session_state.current_page == 'search':
         if not results:
             st.info("This item was not found in the database.")
         else:
-            st.subheader(f"Results for: {results['description']}")
+            # Determine available units and allow selection
+            units = sorted(list({r['unit'] for r in results['results']}))
+            selected_unit = st.selectbox("Unit", ["All"] + units, key="search_unit")
             
+            # Filter results by unit if selected
+            filtered_results = [r for r in results['results'] if selected_unit == "All" or r['unit'] == selected_unit]
+            
+            # Calculate statistics on filtered results
+            prices = [float(r['unit_price']) for r in filtered_results]
+            if prices:
+                avg_price = round(sum(prices) / len(prices), 2)
+                min_price = round(min(prices), 2)
+                max_price = round(max(prices), 2)
+                occurrences = len(prices)
+            else:
+                avg_price = min_price = max_price = 0.0
+                occurrences = 0
+            
+            st.subheader(f"Results for: {results['description']}")
             # Statistics
             col1, col2, col3, col4 = st.columns(4)
-            stats = results['statistics']
-            
             with col1:
-                st.metric("Occurrences", stats['occurrences'])
+                st.metric("Occurrences", occurrences)
             with col2:
-                avg_price = stats['average_price']
                 adjusted_avg = InflationCalculator.calculate_adjusted_price(
                     avg_price, f"{reference_year}-01-01", reference_year, inflation_rate
                 )
                 st.metric("Avg Price", f"${avg_price:.2f}", delta=f"${adjusted_avg:.2f}" if inflation_rate > 0 else None)
             with col3:
-                min_price = stats['min_price']
                 st.metric("Min Price", f"${min_price:.2f}")
             with col4:
-                max_price = stats['max_price']
                 st.metric("Max Price", f"${max_price:.2f}")
             
-            # Price history table
-            st.subheader("Price History")
-            
+            # Build final table and show once
             table_data = []
-            for row in results['results']:
+            for row in filtered_results:
                 adjusted_price = InflationCalculator.calculate_adjusted_price(
                     row['unit_price'],
                     row['project_date'],
@@ -378,7 +406,6 @@ elif st.session_state.current_page == 'search':
                     inflation_rate
                 )
                 years_diff = InflationCalculator.get_year_difference(row['project_date'], reference_year)
-                
                 table_data.append({
                     'Project': row['project_name'],
                     'Date': row['project_date'],
@@ -387,11 +414,11 @@ elif st.session_state.current_page == 'search':
                     'Adjusted Price': f"${adjusted_price:.2f}" if inflation_rate > 0 else "-",
                     'Years': years_diff
                 })
-            
-                df = pd.DataFrame(table_data)
-                st.dataframe(df, use_container_width=True)
+            df = pd.DataFrame(table_data)
+            st.dataframe(df, use_container_width=True)
 
-    st.session_state.perform_search = False
+        # reset search flag
+        st.session_state.perform_search = False
 
 elif st.session_state.current_page == 'categories':
     # Categories management page
@@ -414,3 +441,12 @@ elif st.session_state.current_page == 'categories':
                     st.error("Category already exists")
             else:
                 st.error("Please enter category name")
+    
+    with col2:
+        st.subheader("Existing Categories")
+        categories = Category.get_all()
+        if categories:
+            df = pd.DataFrame(categories)
+            st.dataframe(df, use_container_width=True, hide_index=True)
+        else:
+            st.info("No categories yet")
