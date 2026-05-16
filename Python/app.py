@@ -35,7 +35,7 @@ if 'current_page' not in st.session_state:
 with st.sidebar:
     st.title("🏗️ Alimator")
     st.write("Cost Management System")
-    
+
     if st.session_state.logged_in:
         st.divider()
         if st.button("📊 Dashboard", use_container_width=True, key="nav_home"):
@@ -46,6 +46,9 @@ with st.sidebar:
         
         if st.button("🔍 Search", use_container_width=True, key="nav_search"):
             st.session_state.current_page = 'search'
+        
+        if st.button("📁 Projects", use_container_width=True, key="nav_projects"):
+            st.session_state.current_page = 'projects'
         
         if st.button("📂 Categories", use_container_width=True, key="nav_categories"):
             st.session_state.current_page = 'categories'
@@ -84,7 +87,7 @@ elif st.session_state.current_page == 'home':
     projects = Project.get_all()
     
     if not projects:
-        st.info("No projects yet. Create a new project in the 'Add Data' section.")
+        st.info("No projects yet. Create a new project in the 'Projects' section.")
     else:
         col1, col2, col3 = st.columns(3)
         with col1:
@@ -108,12 +111,43 @@ elif st.session_state.current_page == 'home':
                     st.success("Project deleted")
                     st.rerun()
 
+elif st.session_state.current_page == 'projects':
+    # Projects management page (separate from Add Data)
+    st.title("📁 Projects")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        st.subheader("Add New Project")
+        new_name = st.text_input("Project Name", key="proj_name")
+        new_date = st.date_input("Project Date", key="proj_date")
+        new_desc = st.text_area("Project Description", key="proj_desc")
+        if st.button("Create Project", key="btn_create_project"):
+            if not new_name:
+                st.error("Please enter project name")
+            else:
+                Project.create(new_name, new_desc or '', str(new_date))
+                st.success(f"Project '{new_name}' created")
+                st.rerun()
+    
+    with col2:
+        st.subheader("Existing Projects")
+        projects = Project.get_all()
+        if projects:
+            df = pd.DataFrame(projects)
+            st.dataframe(df[['id', 'name', 'date']], use_container_width=True)
+        else:
+            st.info("No projects yet")
+
 elif st.session_state.current_page == 'add_data':
     # Add Data page
     st.title("➕ Add Data")
     
     tab1, tab2 = st.tabs(["Import Excel", "Manual Entry"])
     
+    # Get projects for selection
+    projects = Project.get_all()
+    project_options = {p['name']: p['id'] for p in projects}
+
     # Tab 1: Import Excel
     with tab1:
         st.subheader("Import BOQ from Excel")
@@ -133,94 +167,35 @@ elif st.session_state.current_page == 'add_data':
         
         col1, col2 = st.columns(2)
         with col1:
-            project_name = st.text_input("Project Name", key="import_project_name")
+            if projects:
+                selected_project_name = st.selectbox("Select Project", ["-- Select --"] + list(project_options.keys()), key="import_select_project")
+            else:
+                st.info("No projects available. Create a project first in Projects page.")
+                selected_project_name = ""
         with col2:
-            project_date = st.date_input("Project Date", key="import_project_date")
+            st.write("")
+            if st.button("Create Project", key="btn_create_project_from_import"):
+                st.session_state.current_page = 'projects'
+                st.rerun()
         
         uploaded_file = st.file_uploader("Choose Excel file", type=['xlsx', 'xls'], key="file_uploader")
         
         if st.button("Import", key="btn_import"):
-            if not project_name:
-                st.error("Please enter project name")
+            if not selected_project_name or selected_project_name == "-- Select --":
+                st.error("Please select a project")
             elif not uploaded_file:
                 st.error("Please select a file")
             else:
+                project_id = project_options.get(selected_project_name)
                 success, message = ExcelImporter.import_boq(
                     uploaded_file,
-                    project_name,
-                    str(project_date)
+                    selected_project_name,
+                    ''
                 )
                 if success:
                     st.success(message)
                 else:
                     st.error(message)
-    
-    # Tab 2: Manual Entry
-    with tab2:
-        st.subheader("Add Items Manually")
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            project_name = st.text_input("Project Name", key="manual_project_name")
-        with col2:
-            project_date = st.date_input("Project Date", key="manual_project_date")
-        
-        project_desc = st.text_area("Project Description (optional)", key="manual_project_desc")
-        
-        st.divider()
-        st.subheader("Items")
-        
-        # Get categories
-        categories = Category.get_all()
-        category_names = ["None"] + [c['name'] for c in categories]
-        
-        num_items = st.slider("Number of items", 1, 10, 1, key="num_items")
-        
-        items_data = []
-        for i in range(num_items):
-            col1, col2, col3, col4, col5 = st.columns(5)
-            with col1:
-                desc = st.text_input("Description", key=f"desc_{i}")
-            with col2:
-                unit = st.text_input("Unit", value="m³", key=f"unit_{i}")
-            with col3:
-                qty = st.number_input("Quantity", min_value=0.0, step=0.1, key=f"qty_{i}")
-            with col4:
-                price = st.number_input("Unit Price", min_value=0.0, step=0.01, key=f"price_{i}")
-            with col5:
-                cat = st.selectbox("Category", category_names, key=f"cat_{i}")
-            
-            items_data.append({
-                'description': desc,
-                'unit': unit,
-                'quantity': qty,
-                'unit_price': price,
-                'category': cat if cat != "None" else None
-            })
-        
-        if st.button("Save Project & Items", key="btn_save_manual"):
-            if not project_name:
-                st.error("Please enter project name")
-            elif not all(item['description'] for item in items_data):
-                st.error("All items must have a description")
-            else:
-                project_id = Project.create(project_name, project_desc or "", str(project_date))
-                
-                for item in items_data:
-                    category_id = None
-                    if item['category']:
-                        category_id = Category.get_by_name(item['category'])
-                    
-                    Item.create(
-                        project_id,
-                        item['description'],
-                        item['unit'],
-                        item['quantity'],
-                        item['unit_price'],
-                        category_id
-                    )
-                
-                st.success(f"Project '{project_name}' created with {num_items} items!")
 
 elif st.session_state.current_page == 'search':
     # Search page
@@ -242,25 +217,27 @@ elif st.session_state.current_page == 'search':
         )
         selected_category_id = category_options[selected_category_name]
     
-    # Item search
+    # Item search (writable input with autocomplete suggestions)
     with col2:
-        if selected_category_id:
-            item_suggestions = Search.get_items_by_category(selected_category_id)
-        else:
-            item_suggestions = Search.autocomplete("", None, limit=100)
-        
-        search_item = st.selectbox(
-            "Search Item",
-            item_suggestions + [""],
-            key="search_item_input",
-            help="Start typing or select from dropdown"
-        )
-    
+        search_item_text = st.text_input("Search Item", key="search_item_text")
+        suggestions = []
+        if len(search_item_text or '') >= 2:
+            suggestions = Search.autocomplete(search_item_text, selected_category_id, limit=10)
+        # Render suggestions as buttons
+        if suggestions:
+            sugg_cols = st.columns(3)
+            for idx, sugg in enumerate(suggestions):
+                c = sugg_cols[idx % 3]
+                if c.button(sugg, key=f"sugg_{idx}"):
+                    st.session_state.search_item_text = sugg
+                    st.session_state.perform_search = True
+                    st.experimental_rerun()
+
     # Search button
     with col3:
         if st.button("🔍 Search", key="btn_search"):
             st.session_state.perform_search = True
-    
+
     # Inflation controls
     st.divider()
     col1, col2, col3 = st.columns(3)
@@ -274,7 +251,8 @@ elif st.session_state.current_page == 'search':
     st.divider()
     
     # Perform search
-    if st.session_state.get('perform_search', False) and search_item:
+    if st.session_state.get('perform_search', False) and st.session_state.get('search_item_text'):
+        search_item = st.session_state.get('search_item_text')
         results = Search.search_items(search_item, selected_category_id)
         
         if not results:
@@ -325,8 +303,8 @@ elif st.session_state.current_page == 'search':
             
             df = pd.DataFrame(table_data)
             st.dataframe(df, use_container_width=True)
-    
-            st.session_state.perform_search = False
+
+    st.session_state.perform_search = False
 
 elif st.session_state.current_page == 'categories':
     # Categories management page
@@ -349,12 +327,5 @@ elif st.session_state.current_page == 'categories':
                     st.error("Category already exists")
             else:
                 st.error("Please enter category name")
-    
-    with col2:
-        st.subheader("Existing Categories")
-        categories = Category.get_all()
-        if categories:
-            df = pd.DataFrame(categories)
-            st.dataframe(df, use_container_width=True, hide_index=True)
-        else:
-            st.info("No categories yet")
+
+with functions.create_or_update_file <>
