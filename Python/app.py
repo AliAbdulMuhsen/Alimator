@@ -197,6 +197,93 @@ elif st.session_state.current_page == 'add_data':
                 else:
                     st.error(message)
 
+    # Tab 2: Manual Entry
+    with tab2:
+        st.subheader("Add Items Manually")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            if projects:
+                selected_project_name_manual = st.selectbox("Select Project", ["-- Select --"] + list(project_options.keys()), key="manual_select_project")
+            else:
+                st.info("No projects available. Create a project first in Projects page.")
+                selected_project_name_manual = ""
+        with col2:
+            if st.button("Create Project", key="btn_create_project_from_manual"):
+                st.session_state.current_page = 'projects'
+                st.rerun()
+        
+        st.divider()
+        st.subheader("Items")
+        
+        # Category management (add new category inline)
+        with st.expander("Manage Categories"):
+            existing_cats = Category.get_all()
+            st.write("Existing categories:")
+            if existing_cats:
+                st.write([c['name'] for c in existing_cats])
+            else:
+                st.write("No categories yet")
+            new_cat_name = st.text_input("New Category Name", key="new_cat_inline")
+            new_cat_desc = st.text_area("Description (optional)", key="new_cat_inline_desc")
+            if st.button("Add Category", key="btn_add_cat_inline"):
+                if new_cat_name:
+                    Category.create(new_cat_name, new_cat_desc or '')
+                    st.success(f"Category '{new_cat_name}' added")
+                    st.rerun()
+                else:
+                    st.error("Enter a category name")
+        
+        # Prepare categories for selectboxes
+        categories = Category.get_all()
+        category_names = ["None"] + [c['name'] for c in categories]
+        
+        num_items = st.slider("Number of items", 1, 20, 1, key="num_items")
+        
+        items_data = []
+        for i in range(num_items):
+            # Reordered columns: Description, Category, Unit, Quantity, Unit Price
+            col1, col2, col3, col4, col5 = st.columns(5)
+            with col1:
+                desc = st.text_input("Description", key=f"desc_{i}")
+            with col2:
+                cat = st.selectbox("Category", category_names, key=f"cat_{i}")
+            with col3:
+                unit = st.text_input("Unit", value="m³", key=f"unit_{i}")
+            with col4:
+                qty = st.number_input("Quantity", min_value=0.0, step=0.1, key=f"qty_{i}")
+            with col5:
+                price = st.number_input("Unit Price", min_value=0.0, step=0.01, key=f"price_{i}")
+            
+            items_data.append({
+                'description': desc,
+                'unit': unit,
+                'quantity': qty,
+                'unit_price': price,
+                'category': cat if cat != "None" else None
+            })
+        
+        if st.button("Save Project & Items", key="btn_save_manual"):
+            if not selected_project_name_manual or selected_project_name_manual == "-- Select --":
+                st.error("Please select a project")
+            elif not all(item['description'] for item in items_data):
+                st.error("All items must have a description")
+            else:
+                project_id = project_options.get(selected_project_name_manual)
+                for item in items_data:
+                    category_id = None
+                    if item['category']:
+                        category_id = Category.get_by_name(item['category'])
+                    Item.create(
+                        project_id,
+                        item['description'],
+                        item['unit'],
+                        item['quantity'],
+                        item['unit_price'],
+                        category_id
+                    )
+                st.success(f"Project '{selected_project_name_manual}' updated with {num_items} items!")
+
 elif st.session_state.current_page == 'search':
     # Search page
     st.title("🔍 Search Items")
@@ -301,8 +388,8 @@ elif st.session_state.current_page == 'search':
                     'Years': years_diff
                 })
             
-            df = pd.DataFrame(table_data)
-            st.dataframe(df, use_container_width=True)
+                df = pd.DataFrame(table_data)
+                st.dataframe(df, use_container_width=True)
 
     st.session_state.perform_search = False
 
@@ -327,5 +414,3 @@ elif st.session_state.current_page == 'categories':
                     st.error("Category already exists")
             else:
                 st.error("Please enter category name")
-
-with functions.create_or_update_file <>
